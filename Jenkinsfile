@@ -2,47 +2,49 @@ pipeline {
   agent any
 
   environment {
-    // change these to your Docker Hub username/repo
+    // Docker Hub details
     DOCKERHUB_REPO = "shrutika91/java-docker-application" 
-    // credential id you created in Jenkins (username/password or token)
     DOCKERHUB_CREDENTIALS_ID = "dockerhub-cred"
-    // image tag - use build number for uniqueness
-    IMAGE_TAG = "${env.BUILD_NUMBER}"
-    IMAGE_NAME = "${env.DOCKERHUB_REPO}:${IMAGE_TAG}"
-    GIT_REPO="https://github.com/shrutika0910/Java-Docker-Application.git"
+    IMAGE_TAG = "${BUILD_NUMBER}"               // auto tag with build number
+    IMAGE_NAME = "${DOCKERHUB_REPO}:${IMAGE_TAG}"
+    GIT_REPO = "https://github.com/shrutika0910/Java-Docker-Application.git"
   }
 
   stages {
+    stage('Cleanup') {
+      steps {
+        deleteDir()  // cleans old files
+      }
+    }
+
     stage('Checkout') {
       steps {
-        checkout scm
+        git branch: 'main', url: "${GIT_REPO}"
       }
     }
 
     stage('Build (Maven)') {
       steps {
-        // if Maven is on the agent PATH:
-        sh 'mvn -B -DskipTests clean package'
-      }
-      post {
-        success {
-          archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-        }
+        bat 'mvn -B -DskipTests clean package'
       }
     }
 
     stage('Build Docker Image') {
       steps {
-        sh "docker build -t ${IMAGE_NAME} --build-arg JAR_FILE=target/java-hello-1.0.0-jar-with-dependencies.jar ."
+        bat "docker build -t ${DOCKERHUB_REPO}:latest ."
       }
     }
 
-    stage('Docker Login & Push') {
+    stage('Tag and Push to Docker Hub') {
       steps {
-        withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDENTIALS_ID, usernameVariable: 'DOCKERHUB_USER', passwordVariable: 'DOCKERHUB_PASS')]) {
-          sh 'echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin'
-          sh "docker push ${IMAGE_NAME}"
-          sh 'docker logout'
+        withCredentials([usernamePassword(credentialsId: "${DOCKERHUB_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+          bat """
+            docker login -u %DOCKER_USER% -p %DOCKER_PASS%
+            docker tag java-docker-app %DOCKERHUB_REPO%:${IMAGE_TAG}
+            docker push %DOCKERHUB_REPO%:${IMAGE_TAG}
+            docker tag java-docker-app %DOCKERHUB_REPO%:latest
+            docker push %DOCKERHUB_REPO%:latest
+          """
         }
       }
     }
@@ -50,10 +52,11 @@ pipeline {
 
   post {
     success {
-      echo "Image pushed: ${IMAGE_NAME}"
+      echo "✅ Build and Docker push successful!"
+      echo "Image pushed to: https://hub.docker.com/r/${DOCKERHUB_REPO}"
     }
     failure {
-      echo "Build failed."
+      echo "❌ Build or push failed. Check Jenkins console output."
     }
   }
 }
